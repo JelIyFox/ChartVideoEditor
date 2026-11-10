@@ -18,6 +18,8 @@ input[type=range]{flex:1;padding:0;min-width:80px}
 #c{flex:1;min-height:0;width:100%;touch-action:none;display:block}
 .ln button{flex:1;padding:12px 0;font-weight:700}
 #ta{width:100%;height:60px;background:var(--ln);color:var(--tx);border:0;border-radius:6px;font:11px monospace}
+#tt{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#b565ff;color:#fff;padding:10px 16px;border-radius:10px;font-weight:700;opacity:0;transition:opacity .25s;pointer-events:none;z-index:9;max-width:90%;text-align:center}
+#tt.on{opacity:1}
 #io{display:none;padding:4px;background:var(--pn)}
 </style></head><body>
 <div id="vw"><video id="v" playsinline poster="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="></video></div>
@@ -32,7 +34,7 @@ input[type=range]{flex:1;padding:0;min-width:80px}
 <div class="row">
 Чарт <select id="cs" style="max-width:110px"></select>
 <input id="nm" style="width:100px" placeholder="название">
-<button id="nw">Новый</button><button id="sv">Сохранить</button><select id="df"><option value="">normal</option><option value="-easy">easy</option><option value="-hard">hard</option></select><button id="sf">В Download</button><span id="st"></span>
+<button id="nw">Новый</button><button id="op">Открыть чарт</button><input type="file" id="of" hidden><button id="sv">Сохранить</button><select id="df"><option value="">normal</option><option value="-easy">easy</option><option value="-hard">hard</option></select><button id="sf">В Download</button><span id="st"></span>
 </div>
 <div class="row">
 Шаг <select id="sn"><option value="0">Точно</option><option value="0.05">0.05 с</option><option value="b4">1/16</option><option value="b2">1/8</option><option value="b1">1/4</option></select>
@@ -49,6 +51,7 @@ Zoom <input type="range" id="zm" min="80" max="500" value="220" style="max-width
 <div class="row"><button id="ex">Export</button><button id="im">Import</button><button id="cl">Очистить чарт</button><button id="dc">Удалить чарт</button></div><div class="row"><button id="ba">Копия всех чартов</button><button id="br">Вернуть из копии</button></div></div>
 <canvas id="c"></canvas>
 <div class="row ln" id="lb"></div>
+<div id="tt"></div>
 <script>
 const $=i=>document.getElementById(i),v=$('v'),c=$('c'),x=c.getContext('2d');
 const COL=['#c24b99','#00ffff','#12fa05','#f9393f'];
@@ -71,7 +74,15 @@ $('cs').onchange=()=>{save();curName=$('cs').value;apply();save()};
 $('nm').onchange=()=>{const n=$('nm').value.trim();if(!n||charts[n]){$('nm').value=curName;return}
  charts[n]=charts[curName];delete charts[curName];curName=n;fillSel();save()};
 $('nw').onclick=()=>{save();let i=Object.keys(charts).length+1;while(charts['chart'+i])i++;curName='chart'+i;charts[curName]={bpm:150,notes:[]};apply();save()};
-$('sv').onclick=save;
+$('sv').onclick=()=>{save();toast('✅ Чарт сохранён в приложении')};
+function toast(m){const t=$('tt');t.textContent=m;t.classList.add('on');clearTimeout(window._tt);window._tt=setTimeout(()=>t.classList.remove('on'),2500)}
+$('op').onclick=()=>$('of').click();
+$('of').onchange=()=>{const f=$('of').files[0];if(!f)return;const fr=new FileReader();
+ fr.onload=()=>{let j,nm=f.name.replace(/\.json$/i,'');
+  try{j=JSON.parse(fr.result)}catch(e){alert('Это не JSON чарта');return}
+  nm=(j.song&&j.song.song)||nm;save();let n=String(nm),i=2;while(charts[n])n=nm+' '+i++;
+  curName=n;charts[n]={bpm:150,notes:[]};apply();$('ta').value=fr.result;$('im').onclick();toast('📂 Чарт открыт: '+n)};
+ fr.readAsText(f);$('of').value=''};
 $('dc').onclick=()=>{if(!confirm('Удалить чарт «'+curName+'»?'))return;delete charts[curName];curName=Object.keys(charts)[0]||'chart1';if(!charts[curName])charts[curName]={bpm:150,notes:[]};apply();save()};
 $('bpm').onchange=save;
 $('ba').onclick=()=>{save();$('ta').value=JSON.stringify({psychBackup:charts});$('ta').select();try{document.execCommand('copy')}catch(e){}};
@@ -121,7 +132,7 @@ function chartJson(){const b=bpm(),sl=4*60000/b,ns=[...notes].sort((a,b)=>a.t-b.
  return JSON.stringify({song:o},null,'\t')}
 $('ex').onclick=()=>{$('ta').value=chartJson();$('ta').select();try{document.execCommand('copy')}catch(e){}};
 function toFile(manual){const name=curName.replace(/[\\\/:*?"<>|]+/g,'_')+$('df').value+'.json',data=chartJson();
- if(window.Android&&Android.save){const r=String(Android.save(name,data));$('st').textContent=r.indexOf('ERR')==0?'⚠ '+r:'📁 Download/'+name}
+ if(window.Android&&Android.save){const r=String(Android.save(name,data)),bad=r.indexOf('ERR')==0;$('st').textContent=bad?'⚠ '+r:'📁 Download/'+name;if(manual||bad)toast(bad?'⚠ Ошибка: '+r:'✅ Файл сохранён: Download/'+name)}
  else if(manual){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data],{type:'application/json'}));a.download=name;a.click();$('st').textContent='⚠ нет Android.save'}}
 $('sf').onclick=()=>toFile(true);
 $('im').onclick=()=>{try{const j=JSON.parse($('ta').value),s=j.song||j;if(j.format||!Array.isArray(s.notes)||(s.notes[0]&&s.notes[0].t!==undefined))throw 'v1';if(s.bpm)$('bpm').value=s.bpm;notes.length=0;sel=null;
