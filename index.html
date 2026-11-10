@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Video + Chart Editor</title>
+<style>
+:root{--bg:#15131c;--pn:#25222f;--ln:#3a3648;--tx:#ece8f5;--ac:#b565ff}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--tx);font:13px system-ui,sans-serif;overflow:hidden}
+body{display:flex;flex-direction:column;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+#vw{flex:0 0 28%;background:#000;display:flex;justify-content:center;min-height:0}
+video{max-width:100%;max-height:100%}
+.row{display:flex;gap:4px;padding:3px 4px;background:var(--pn);align-items:center;flex-wrap:wrap}
+button,select,input{background:var(--ln);color:var(--tx);border:0;border-radius:6px;padding:7px 9px;font:inherit}
+button:active{background:var(--ac)}
+input[type=number]{width:62px}
+input[type=range]{flex:1;padding:0;min-width:80px}
+#tm{font-variant-numeric:tabular-nums;font-weight:700;min-width:84px}
+#c{flex:1;min-height:0;width:100%;touch-action:none;display:block}
+.ln button{flex:1;padding:12px 0;font-weight:700}
+#ta{width:100%;height:60px;background:var(--ln);color:var(--tx);border:0;border-radius:6px;font:11px monospace}
+#io{display:none;padding:4px;background:var(--pn)}
+</style></head><body>
+<div id="vw"><video id="v" playsinline poster="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="></video></div>
+<div class="row">
+<input type="file" id="f" accept="video/*,audio/*" style="max-width:150px">
+<button id="pp">▶/❚❚</button>
+<button data-n="-0.05">−0.05</button><button data-n="0.05">+0.05</button>
+<span id="tm">0.00</span>
+<select id="rt"><option>0.25</option><option>0.5</option><option selected>1</option><option>1.5</option></select>
+</div>
+<div class="row"><input type="range" id="sk" min="0" max="1" step="0.01" value="0"></div>
+<div class="row">
+Чарт <select id="cs" style="max-width:110px"></select>
+<input id="nm" style="width:100px" placeholder="название">
+<button id="nw">Новый</button><button id="sv">Сохранить</button><select id="df"><option value="">normal</option><option value="-easy">easy</option><option value="-hard">hard</option></select><button id="sf">В Download</button><span id="st"></span>
+</div>
+<div class="row">
+Шаг <select id="sn"><option value="0">Точно</option><option value="0.05">0.05 с</option><option value="b4">1/16</option><option value="b2">1/8</option><option value="b1">1/4</option></select>
+BPM <input type="number" id="bpm" value="150">
+Новая нота, хвост мс <input type="number" id="su" value="0" step="50">
+Zoom <input type="range" id="zm" min="80" max="500" value="220" style="max-width:80px">
+<button id="io1">JSON</button>
+</div>
+<div class="row">
+Хвост выбранной <input type="number" id="ts" value="0" step="50">
+<button data-s="-100">−100</button><button data-s="100">+100</button><button id="tc">до курсора</button><button id="dl">Удалить ноту</button>
+</div>
+<div id="io"><textarea id="ta" placeholder="Вставь JSON чарта и нажми Import"></textarea>
+<div class="row"><button id="ex">Export</button><button id="im">Import</button><button id="cl">Очистить чарт</button><button id="dc">Удалить чарт</button></div><div class="row"><button id="ba">Копия всех чартов</button><button id="br">Вернуть из копии</button></div></div>
+<canvas id="c"></canvas>
+<div class="row ln" id="lb"></div>
+<script>
+const $=i=>document.getElementById(i),v=$('v'),c=$('c'),x=c.getContext('2d');
+const COL=['#c24b99','#00ffff','#12fa05','#f9393f'];
+let notes=[],charts={},curName='',sel=null,pps=220,PY=70,W=0,H=0,drag=null;
+const bpm=()=>+$('bpm').value||150;
+const cur=()=>v.currentTime||0;
+const exact=()=>$('sn').value=='0';
+function step(){const s=$('sn').value,b=60/bpm();return s=='b4'?b/4:s=='b2'?b/2:s=='b1'?b:(+s||0.05)}
+function snapMs(sec){if(exact())return Math.round(sec*1000);const st=step();return Math.round(Math.round(sec/st)*st*1000)}
+// --- charts storage ---
+function save(){charts[curName]={bpm:bpm(),notes,meta:(charts[curName]||{}).meta};try{localStorage.setItem('ch_all',JSON.stringify(charts));localStorage.setItem('ch_cur',curName);if(localStorage.getItem('ch_cur')!==curName)throw 0;$('st').textContent='✓'}catch(e){$('st').textContent='⚠ память выключена (DOM Storage)'}
+ if(window.Android&&Android.save){clearTimeout(window._ft);window._ft=setTimeout(()=>toFile(false),800)}}
+function fillSel(){const s=$('cs');s.innerHTML='';Object.keys(charts).forEach(k=>{const o=document.createElement('option');o.textContent=k;o.selected=k==curName;s.appendChild(o)})}
+function syncTs(){$('ts').value=sel?sel.s:0}
+function apply(){const ch=charts[curName];notes=ch.notes;$('bpm').value=ch.bpm;sel=null;syncTs();$('nm').value=curName;fillSel()}
+function load(){try{charts=JSON.parse(localStorage.getItem('ch_all')||'{}');curName=localStorage.getItem('ch_cur')||''}catch(e){charts={};$('st').textContent='⚠ память выключена (DOM Storage)'}
+ if(!charts[curName])curName=Object.keys(charts)[0]||'chart1';
+ if(!charts[curName])charts[curName]={bpm:150,notes:[]};apply()}
+$('cs').onchange=()=>{save();curName=$('cs').value;apply();save()};
+$('nm').onchange=()=>{const n=$('nm').value.trim();if(!n||charts[n]){$('nm').value=curName;return}
+ charts[n]=charts[curName];delete charts[curName];curName=n;fillSel();save()};
+$('nw').onclick=()=>{save();let i=Object.keys(charts).length+1;while(charts['chart'+i])i++;curName='chart'+i;charts[curName]={bpm:150,notes:[]};apply();save()};
+$('sv').onclick=save;
+$('dc').onclick=()=>{if(!confirm('Удалить чарт «'+curName+'»?'))return;delete charts[curName];curName=Object.keys(charts)[0]||'chart1';if(!charts[curName])charts[curName]={bpm:150,notes:[]};apply();save()};
+$('bpm').onchange=save;
+$('ba').onclick=()=>{save();$('ta').value=JSON.stringify({psychBackup:charts});$('ta').select();try{document.execCommand('copy')}catch(e){}};
+$('br').onclick=()=>{try{const j=JSON.parse($('ta').value);if(!j.psychBackup)throw 0;Object.assign(charts,j.psychBackup);apply();save()}catch(e){alert('Это не копия чартов')}};
+// --- notes ---
+function addNote(ms,l,s){ms=Math.max(0,ms);
+ const i=notes.findIndex(n=>Math.abs(n.t-ms)<2&&n.l==l);
+ if(i>=0){if(sel===notes[i])sel=null;notes.splice(i,1)}
+ else{const n={t:ms,l:l,s:s!=null?s:Math.max(0,+$('su').value||0)};notes.push(n);sel=n}
+ syncTs();save()}
+for(let l=0;l<8;l++){const b=document.createElement('button');let t0=0;
+ b.textContent=['←','↓','↑','→'][l%4];b.style.borderBottom='4px solid '+COL[l%4];b.style.opacity=l<4?1:.8;
+ b.onpointerdown=()=>{t0=snapMs(cur())};
+ b.onpointerup=()=>{const d=Math.round(cur()*1000)-t0;addNote(t0,l,d>200?d:undefined)};
+ $('lb').appendChild(b)}
+document.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>{if(sel){sel.s=Math.max(0,sel.s+ +b.dataset.s);syncTs();save()}});
+$('ts').onchange=()=>{if(sel){sel.s=Math.max(0,+$('ts').value||0);save()}};
+$('tc').onclick=()=>{if(sel){sel.s=Math.max(0,Math.round(cur()*1000)-sel.t);syncTs();save()}};
+$('dl').onclick=()=>{if(sel){notes.splice(notes.indexOf(sel),1);sel=null;syncTs();save()}};
+// --- controls ---
+$('f').onchange=e=>{const f=e.target.files[0];if(f)v.src=URL.createObjectURL(f)};
+v.onclick=()=>v.paused?v.play():v.pause();
+$('pp').onclick=()=>v.paused?v.play():v.pause();
+document.querySelectorAll('[data-n]').forEach(b=>b.onclick=()=>{v.currentTime=Math.max(0,cur()+ +b.dataset.n)});
+$('rt').onchange=()=>v.playbackRate=+$('rt').value;
+$('zm').oninput=()=>pps=+$('zm').value;
+$('sk').oninput=()=>{v.currentTime=+$('sk').value};
+v.onloadedmetadata=()=>{$('sk').max=v.duration};
+$('io1').onclick=()=>{const d=$('io');d.style.display=d.style.display=='block'?'none':'block';resize()};
+$('cl').onclick=()=>{if(confirm('Удалить все ноты?')){notes.length=0;sel=null;syncTs();save()}};
+// tap: select/add, drag: scroll
+c.onpointerdown=e=>{c.setPointerCapture(e.pointerId);drag={y:e.clientY,m:0,t:cur()}};
+c.onpointermove=e=>{if(!drag)return;const dy=e.clientY-drag.y;if(Math.abs(dy)>8)drag.m=1;
+ if(drag.m)v.currentTime=Math.max(0,drag.t-dy/pps)};
+c.onpointerup=e=>{if(drag&&!drag.m){const r=c.getBoundingClientRect(),px=e.clientX-r.left,py=e.clientY-r.top;
+ const l=Math.min(7,Math.floor(px/(W/8))),t=cur();
+ const hit=notes.find(n=>{if(n.l!=l)return false;const y=PY+(n.t/1000-t)*pps;return py>=y-16&&py<=y+Math.max(16,n.s/1000*pps)});
+ if(hit){sel=hit;syncTs()}
+ else addNote(exact()?Math.round(t*1000):snapMs(t+(py-PY)/pps),l)}
+ drag=null};
+// --- export/import (Psych Engine) ---
+function chartJson(){const b=bpm(),sl=4*60000/b,ns=[...notes].sort((a,b)=>a.t-b.t),cnt=ns.length?Math.floor(ns[ns.length-1].t/sl)+1:1,secs=[],m=(charts[curName]||{}).meta||{};
+ for(let i=0;i<cnt;i++)secs.push({lengthInSteps:16,sectionNotes:[],typeOfSection:0,gfSection:false,altAnim:false,changeBPM:false,bpm:b,mustHitSection:true});
+ ns.forEach(n=>{const a=[n.t,n.l,n.s];if(n.k!==undefined)a.push(n.k);secs[Math.floor(n.t/sl)].sectionNotes.push(a)});
+ const o={player1:m.player1||'bf',events:m.events||[],gfVersion:m.gfVersion||'gf',notes:secs,player2:m.player2||'dad',player3:m.player3||'gf',splashSkin:m.splashSkin!=null?m.splashSkin:'noteSplashes',song:curName,needsVoices:m.needsVoices!=null?m.needsVoices:true,arrowSkin:m.arrowSkin!=null?m.arrowSkin:'',stage:m.stage||'stage',validScore:true,bpm:b,speed:m.speed||2};
+ for(const k in m)if(!(k in o))o[k]=m[k];
+ return JSON.stringify({song:o},null,'\t')}
+$('ex').onclick=()=>{$('ta').value=chartJson();$('ta').select();try{document.execCommand('copy')}catch(e){}};
+function toFile(manual){const name=curName.replace(/[\\\/:*?"<>|]+/g,'_')+$('df').value+'.json',data=chartJson();
+ if(window.Android&&Android.save){const r=String(Android.save(name,data));$('st').textContent=r.indexOf('ERR')==0?'⚠ '+r:'📁 Download/'+name}
+ else if(manual){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data],{type:'application/json'}));a.download=name;a.click();$('st').textContent='⚠ нет Android.save'}}
+$('sf').onclick=()=>toFile(true);
+$('im').onclick=()=>{try{const j=JSON.parse($('ta').value),s=j.song||j;if(j.format||!Array.isArray(s.notes)||(s.notes[0]&&s.notes[0].t!==undefined))throw 'v1';if(s.bpm)$('bpm').value=s.bpm;notes.length=0;sel=null;
+ (s.notes||[]).forEach(sec=>(sec.sectionNotes||[]).forEach(n=>{let l=n[1];if(l<0)return;if(!sec.mustHitSection)l=(l+4)%8;notes.push({t:Math.round(n[0]),l:l%8,s:n[2]||0,k:n[3]})}));
+ const m={...s};delete m.notes;charts[curName].meta=m;syncTs();save()}catch(e){alert(e=='v1'?'Формат 1.0.x не поддерживается. Нужен чарт версии 0.7.3 или ниже.':'Ошибка JSON')}};
+function resize(){const d=devicePixelRatio||1;W=c.clientWidth;H=c.clientHeight;c.width=W*d;c.height=H*d;x.setTransform(d,0,0,d,0,0)}
+addEventListener('resize',resize);
+// --- draw ---
+function draw(){
+ const t=cur(),lw=W/8;x.fillStyle='#1b1824';x.fillRect(0,0,W,H);
+ for(let l=0;l<4;l++){x.fillStyle='#201c2b';x.fillRect(l*lw,0,lw,H)}
+ const st=step(),b=60/bpm(),t0=t-PY/pps,t1=t+(H-PY)/pps;
+ for(let k=Math.floor(t0/st);k*st<=t1;k++){const s=k*st;if(s<0)continue;const y=PY+(s-t)*pps,beat=Math.abs(s/b-Math.round(s/b))<1e-3;
+  x.strokeStyle=beat?'#5a5470':'#2c2839';x.lineWidth=1;x.beginPath();x.moveTo(0,y);x.lineTo(W,y);x.stroke();
+  if(beat){x.fillStyle='#7d759a';x.font='10px sans-serif';x.fillText(s.toFixed(2),2,y-2)}}
+ x.strokeStyle='#8a82a8';x.lineWidth=2;x.beginPath();x.moveTo(W/2,0);x.lineTo(W/2,H);x.stroke();
+ for(const n of notes){const y=PY+(n.t/1000-t)*pps,sy=n.s/1000*pps;if(y>H+20||y+sy<-20)continue;
+  const cx=n.l*lw+lw/2,col=COL[n.l%4],r=Math.min(lw*.38,16);
+  if(n.s>0){x.fillStyle=col;x.globalAlpha=.6;x.fillRect(cx-5,y,10,sy);x.globalAlpha=1;x.fillRect(cx-8,y+sy-3,16,6)}
+  x.fillStyle=col;x.strokeStyle=n===sel?'#fff':'#000';x.lineWidth=n===sel?3:2;
+  x.beginPath();x.roundRect(cx-r,y-r*.7,r*2,r*1.4,5);x.fill();x.stroke()}
+ x.strokeStyle='#fff';x.lineWidth=2;x.beginPath();x.moveTo(0,PY);x.lineTo(W,PY);x.stroke();
+ x.fillStyle='#b565ff';x.font='bold 11px sans-serif';x.fillText('BF',4,PY-8);x.fillText('OPP',W/2+4,PY-8);
+ $('tm').textContent=t.toFixed(3)+' с';
+ if(!drag&&document.activeElement!==$('sk'))$('sk').value=t;
+ requestAnimationFrame(draw)}
+resize();load();draw();
+</script></body></html>
