@@ -34,7 +34,7 @@ input[type=range]{flex:1;padding:0;min-width:80px}
 <div class="row">
 Чарт <select id="cs" style="max-width:110px"></select>
 <input id="nm" style="width:100px" placeholder="название">
-<button id="nw">Новый</button><button id="op">Открыть чарт</button><input type="file" id="of" hidden><button id="sv">Сохранить</button><select id="df"><option value="">normal</option><option value="-easy">easy</option><option value="-hard">hard</option></select><button id="sf">В Download</button><span id="st"></span>
+<button id="nw">Новый</button><button id="op">Открыть чарт</button><input type="file" id="of" hidden><button id="sv">Сохранить</button><select id="fm"><option value="psych">Psych 0.7.3</option><option value="vs">V-Slice</option><option value="cne">Codename</option></select><select id="df"><option value="">normal</option><option value="-easy">easy</option><option value="-hard">hard</option></select><button id="sf">В Download</button><span id="st"></span>
 </div>
 <div class="row">
 Шаг <select id="sn"><option value="0">Точно</option><option value="0.05">0.05 с</option><option value="b4">1/16</option><option value="b2">1/8</option><option value="b1">1/4</option></select>
@@ -62,7 +62,7 @@ const exact=()=>$('sn').value=='0';
 function step(){const s=$('sn').value,b=60/bpm();return s=='b4'?b/4:s=='b2'?b/2:s=='b1'?b:(+s||0.05)}
 function snapMs(sec){if(exact())return Math.round(sec*1000);const st=step();return Math.round(Math.round(sec/st)*st*1000)}
 // --- charts storage ---
-function save(){charts[curName]={bpm:bpm(),notes,meta:(charts[curName]||{}).meta};try{localStorage.setItem('ch_all',JSON.stringify(charts));localStorage.setItem('ch_cur',curName);if(localStorage.getItem('ch_cur')!==curName)throw 0;$('st').textContent='✓'}catch(e){$('st').textContent='⚠ память выключена (DOM Storage)'}
+function save(){charts[curName]={bpm:bpm(),notes,meta:(charts[curName]||{}).meta,x:(charts[curName]||{}).x};try{localStorage.setItem('ch_all',JSON.stringify(charts));localStorage.setItem('ch_cur',curName);if(localStorage.getItem('ch_cur')!==curName)throw 0;$('st').textContent='✓'}catch(e){$('st').textContent='⚠ память выключена (DOM Storage)'}
  if(window.Android&&Android.save){clearTimeout(window._ft);window._ft=setTimeout(()=>toFile(false),800)}}
 function fillSel(){const s=$('cs');s.innerHTML='';Object.keys(charts).forEach(k=>{const o=document.createElement('option');o.textContent=k;o.selected=k==curName;s.appendChild(o)})}
 function syncTs(){$('ts').value=sel?sel.s:0}
@@ -78,10 +78,14 @@ $('sv').onclick=()=>{save();toast('✅ Чарт сохранён в прилож
 function toast(m){const t=$('tt');t.textContent=m;t.classList.add('on');clearTimeout(window._tt);window._tt=setTimeout(()=>t.classList.remove('on'),2500)}
 $('op').onclick=()=>$('of').click();
 $('of').onchange=()=>{const f=$('of').files[0];if(!f)return;const fr=new FileReader();
- fr.onload=()=>{let j,nm=f.name.replace(/\.json$/i,'');
-  try{j=JSON.parse(fr.result)}catch(e){alert('Это не JSON чарта');return}
-  nm=(j.song&&j.song.song)||nm;save();let n=String(nm),i=2;while(charts[n])n=nm+' '+i++;
-  curName=n;charts[n]={bpm:150,notes:[]};apply();$('ta').value=fr.result;$('im').onclick();toast('📂 Чарт открыт: '+n)};
+ fr.onload=()=>{let j;try{j=JSON.parse(fr.result)}catch(e){alert('Это не JSON чарта');return}
+  const k=kindOf(j),prev=curName;
+  if(k=='vsm'||k=='cnem'){try{toast('📥 Импорт: '+importAny(fr.result))}catch(e){alert('Ошибка файла')}return}
+  let nm=(j.song&&typeof j.song=='object'&&j.song.song)||(typeof j.song=='string'&&j.song)||f.name.replace(/(-chart)?\.json$/i,'');
+  save();let n=String(nm),i=2;while(charts[n])n=nm+' '+i++;
+  curName=n;charts[n]={bpm:150,notes:[]};apply();
+  try{toast('📂 Открыт: '+n+' — '+importAny(fr.result))}
+  catch(e){delete charts[n];curName=prev;apply();alert(e=='v1'?'Формат Psych 1.0.x не поддерживается':e=='bad'?'Неизвестный формат чарта':'Ошибка файла')}};
  fr.readAsText(f);$('of').value=''};
 $('dc').onclick=()=>{if(!confirm('Удалить чарт «'+curName+'»?'))return;delete charts[curName];curName=Object.keys(charts)[0]||'chart1';if(!charts[curName])charts[curName]={bpm:150,notes:[]};apply();save()};
 $('bpm').onchange=save;
@@ -124,20 +128,79 @@ c.onpointerup=e=>{if(drag&&!drag.m){const r=c.getBoundingClientRect(),px=e.clien
  else addNote(exact()?Math.round(t*1000):snapMs(t+(py-PY)/pps),l)}
  drag=null};
 // --- export/import (Psych Engine) ---
-function chartJson(){const b=bpm(),sl=4*60000/b,ns=[...notes].sort((a,b)=>a.t-b.t),cnt=ns.length?Math.floor(ns[ns.length-1].t/sl)+1:1,secs=[],m=(charts[curName]||{}).meta||{};
+function psychJson(){const b=bpm(),sl=4*60000/b,ns=[...notes].sort((a,b)=>a.t-b.t),cnt=ns.length?Math.floor(ns[ns.length-1].t/sl)+1:1,secs=[],m=(charts[curName]||{}).meta||{};
  for(let i=0;i<cnt;i++)secs.push({lengthInSteps:16,sectionNotes:[],typeOfSection:0,gfSection:false,altAnim:false,changeBPM:false,bpm:b,mustHitSection:true});
  ns.forEach(n=>{const a=[n.t,n.l,n.s];if(n.k!==undefined)a.push(n.k);secs[Math.floor(n.t/sl)].sectionNotes.push(a)});
  const o={player1:m.player1||'bf',events:m.events||[],gfVersion:m.gfVersion||'gf',notes:secs,player2:m.player2||'dad',player3:m.player3||'gf',splashSkin:m.splashSkin!=null?m.splashSkin:'noteSplashes',song:curName,needsVoices:m.needsVoices!=null?m.needsVoices:true,arrowSkin:m.arrowSkin!=null?m.arrowSkin:'',stage:m.stage||'stage',validScore:true,bpm:b,speed:m.speed||2};
  for(const k in m)if(!(k in o))o[k]=m[k];
  return JSON.stringify({song:o},null,'\t')}
 $('ex').onclick=()=>{$('ta').value=chartJson();$('ta').select();try{document.execCommand('copy')}catch(e){}};
-function toFile(manual){const name=curName.replace(/[\\\/:*?"<>|]+/g,'_')+$('df').value+'.json',data=chartJson();
- if(window.Android&&Android.save){const r=String(Android.save(name,data)),bad=r.indexOf('ERR')==0;$('st').textContent=bad?'⚠ '+r:'📁 Download/'+name;if(manual||bad)toast(bad?'⚠ Ошибка: '+r:'✅ Файл сохранён: Download/'+name)}
- else if(manual){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data],{type:'application/json'}));a.download=name;a.click();$('st').textContent='⚠ нет Android.save'}}
+function diffName(){const v=$('df').value;return v?v.slice(1):'normal'}
+function chartJson(){const f=$('fm').value;return f=='vs'?vsJson():f=='cne'?cneJson():psychJson()}
+const exX=()=>charts[curName].x||{},exM=()=>charts[curName].meta||{},srt=()=>[...notes].sort((a,b)=>a.t-b.t);
+function vsJson(){const x=exX().vs||{};
+ const o={version:'2.0.0',scrollSpeed:x.scrollSpeed||{default:1.5},events:x.events||[],notes:{},generatedBy:'Chart Video Editor'};
+ o.notes[diffName()]=srt().map(n=>{const a={t:n.t,d:n.l,l:n.s};if(n.k)a.k=n.k;return a});
+ return JSON.stringify(o,null,2)}
+function vsMetaJson(){const x=exX(),m=exM(),b=bpm(),dn=diffName();
+ const o=x.vsMeta?JSON.parse(JSON.stringify(x.vsMeta)):{version:'2.2.4',songName:curName,artist:'Unknown',timeFormat:'ms',timeChanges:[{t:0,b:0,bpm:b,n:4,d:4,bt:[4,4,4,4]}],generatedBy:'Chart Video Editor',looped:false,playData:{songVariations:[],difficulties:[dn],characters:{player:m.player1||'bf',girlfriend:m.gfVersion||'gf',opponent:m.player2||'dad',instrumental:''},stage:'mainStage',noteStyle:'funkin',ratings:{},album:'',previewStart:0,previewEnd:15000}};
+ if(o.timeChanges&&o.timeChanges[0])o.timeChanges[0].bpm=b;
+ const pd=o.playData=o.playData||{};pd.difficulties=pd.difficulties||[];if(pd.difficulties.indexOf(dn)<0)pd.difficulties.push(dn);
+ pd.ratings=pd.ratings||{};if(pd.ratings[dn]==null)pd.ratings[dn]=1;
+ return JSON.stringify(o,null,2)}
+function cneJson(){const x=exX().cne||{},m=exM(),types=[];
+ const mk=off=>srt().filter(n=>off?n.l>=4:n.l<4).map(n=>{let t=0;if(n.k){let i=types.indexOf(n.k);if(i<0){types.push(n.k);i=types.length-1}t=i+1}return{time:n.t,id:n.l%4,sLen:n.s,type:t}});
+ const op=mk(1),pl=mk(0);
+ const sl=(type,pos,ch,lp,vis,nn)=>({type:type,position:pos,characters:[ch],strumLinePos:lp,visible:vis,vocalsSuffix:'',notes:nn});
+ const o={strumLines:[sl(0,'dad',m.player2||'dad',0.25,true,op),sl(1,'boyfriend',m.player1||'bf',0.75,true,pl),sl(2,'girlfriend',m.gfVersion||'gf',0.5,false,[])],
+  events:x.events||[],stage:x.stage||m.stage||'stage',scrollSpeed:x.scrollSpeed||m.speed||2,noteTypes:types,codenameChart:true,coopAllowed:false,opponentModeAllowed:true};
+ return JSON.stringify(o,null,4)}
+function cneMetaJson(){const x=exX().cneMeta||{},m=exM(),dn=diffName();
+ const o=Object.assign({name:curName,bpm:bpm(),beatsPerMeasure:4,stepsPerBeat:4,needsVoices:m.needsVoices!=null?m.needsVoices:true,displayName:curName,difficulties:[dn]},x);
+ o.bpm=bpm();if(Array.isArray(o.difficulties)&&o.difficulties.indexOf(dn)<0)o.difficulties.push(dn);
+ return JSON.stringify(o,null,4)}
+function toFile(manual){const base=curName.replace(/[\\\/:*?"<>|]+/g,'_'),f=$('fm').value,dn=diffName();
+ const files=f=='vs'?[[base+'-chart.json',vsJson()],[base+'-metadata.json',vsMetaJson()]]:f=='cne'?[[base+'-'+dn+'.json',cneJson()],[base+'-meta.json',cneMetaJson()]]:[[base+$('df').value+'.json',psychJson()]];
+ if(window.Android&&Android.save){let bad='';const ok=[];files.forEach(a=>{const r=String(Android.save(a[0],a[1]));if(r.indexOf('ERR')==0)bad=r;else ok.push(a[0])});
+  $('st').textContent=bad?'⚠ '+bad:'📁 '+ok.join(', ');
+  if(manual||bad)toast(bad?'⚠ Ошибка: '+bad:'✅ Сохранено в Download: '+ok.join(', '))}
+ else if(manual){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([files[0][1]],{type:'application/json'}));a.download=files[0][0];a.click();$('st').textContent='⚠ нет Android.save'}}
 $('sf').onclick=()=>toFile(true);
-$('im').onclick=()=>{try{const j=JSON.parse($('ta').value),s=j.song||j;if(j.format||!Array.isArray(s.notes)||(s.notes[0]&&s.notes[0].t!==undefined))throw 'v1';if(s.bpm)$('bpm').value=s.bpm;notes.length=0;sel=null;
- (s.notes||[]).forEach(sec=>(sec.sectionNotes||[]).forEach(n=>{let l=n[1];if(l<0)return;if(!sec.mustHitSection)l=(l+4)%8;notes.push({t:Math.round(n[0]),l:l%8,s:n[2]||0,k:n[3]})}));
- const m={...s};delete m.notes;charts[curName].meta=m;syncTs();save()}catch(e){alert(e=='v1'?'Формат 1.0.x не поддерживается. Нужен чарт версии 0.7.3 или ниже.':'Ошибка JSON')}};
+function kindOf(j){const s=j.song||j;
+ if(j.codenameChart)return 'cne';
+ if(j.timeChanges&&j.playData)return 'vsm';
+ if(j.notes&&!Array.isArray(j.notes)&&typeof j.notes=='object')return j.version?'vs':'v1';
+ if(!j.song&&!j.notes&&j.name!=null&&j.bpm!=null)return 'cnem';
+ if(j.format)return 'v1';
+ if(s&&Array.isArray(s.notes)&&!(s.notes[0]&&s.notes[0].t!==undefined))return 'psych';
+ return 'bad'}
+function setNotes(a){notes.length=0;a.forEach(n=>notes.push(n));sel=null;syncTs()}
+function importAny(txt){
+ const j=JSON.parse(txt),k=kindOf(j);if(k=='bad'||k=='v1')throw k;
+ const c=charts[curName];c.meta=c.meta||{};c.x=c.x||{};const m=c.meta,x=c.x;let res='';
+ if(k=='psych'){const s=j.song||j;if(s.bpm)$('bpm').value=s.bpm;const a=[];
+  (s.notes||[]).forEach(sec=>(sec.sectionNotes||[]).forEach(n=>{let l=n[1];if(l<0)return;if(!sec.mustHitSection)l=(l+4)%8;a.push({t:Math.round(n[0]),l:l%8,s:n[2]||0,k:(typeof n[3]=='string'&&n[3])?n[3]:undefined})}));
+  setNotes(a);const mm={...s};delete mm.notes;c.meta=mm;res='Psych'}
+ else if(k=='vs'){const keys=Object.keys(j.notes),dn=diffName(),key=keys.indexOf(dn)>=0?dn:keys.indexOf('normal')>=0?'normal':keys[0];
+  setNotes((j.notes[key]||[]).filter(n=>n.d>=0&&n.d<8).map(n=>({t:Math.round(n.t),l:n.d|0,s:Math.round(n.l||0),k:n.k||undefined})));
+  x.vs={events:j.events||[],scrollSpeed:j.scrollSpeed};
+  $('df').value=key=='easy'?'-easy':key=='hard'?'-hard':'';
+  res='V-Slice ('+key+(keys.length>1?', есть: '+keys.join('/'):'')+')'}
+ else if(k=='cne'){const sl=j.strumLines||[],pl=sl.find(z=>z.type==1),op=sl.find(z=>z.type==0),gf=sl.find(z=>z.type==2),a=[],tp=j.noteTypes||[];
+  const add=(z,off)=>z&&(z.notes||[]).forEach(n=>a.push({t:Math.round(n.time),l:off+((n.id|0)%4),s:Math.round(n.sLen||0),k:n.type>0?tp[n.type-1]:undefined}));
+  add(pl,0);add(op,4);setNotes(a);
+  x.cne={events:j.events||[],stage:j.stage,scrollSpeed:j.scrollSpeed};
+  if(pl&&pl.characters&&pl.characters[0])m.player1=pl.characters[0];
+  if(op&&op.characters&&op.characters[0])m.player2=op.characters[0];
+  if(gf&&gf.characters&&gf.characters[0])m.gfVersion=gf.characters[0];
+  const sk=sl.filter(z=>z!==pl&&z!==op&&(z.notes||[]).length).length;
+  res='Codename'+(sk?' (пропущено доп. стрим-лайнов: '+sk+')':'')}
+ else if(k=='vsm'){const tc=(j.timeChanges||[])[0];if(tc&&tc.bpm)$('bpm').value=tc.bpm;x.vsMeta=j;const ch=(j.playData||{}).characters||{};
+  if(ch.player)m.player1=ch.player;if(ch.opponent)m.player2=ch.opponent;if(ch.girlfriend)m.gfVersion=ch.girlfriend;res='метаданные V-Slice'}
+ else if(k=='cnem'){$('bpm').value=j.bpm;x.cneMeta=j;if(j.needsVoices!=null)m.needsVoices=j.needsVoices;res='метаданные Codename'}
+ if(k=='psych'||k=='vs'||k=='cne')$('fm').value=k=='psych'?'psych':k;
+ syncTs();save();return res}
+$('im').onclick=()=>{try{toast('📥 Импорт: '+importAny($('ta').value))}catch(e){alert(e=='v1'?'Формат Psych 1.0.x не поддерживается. Нужен чарт 0.7.3 или ниже, V-Slice или Codename.':e=='bad'?'Неизвестный формат чарта':'Ошибка JSON')}};
 function resize(){const d=devicePixelRatio||1;W=c.clientWidth;H=c.clientHeight;c.width=W*d;c.height=H*d;x.setTransform(d,0,0,d,0,0)}
 addEventListener('resize',resize);
 // --- draw ---
